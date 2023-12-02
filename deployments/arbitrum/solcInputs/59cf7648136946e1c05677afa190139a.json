@@ -1,0 +1,41 @@
+{
+  "language": "Solidity",
+  "sources": {
+    "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.0;\n\ninterface AggregatorV3Interface {\n  function decimals() external view returns (uint8);\n\n  function description() external view returns (string memory);\n\n  function version() external view returns (uint256);\n\n  function getRoundData(\n    uint80 _roundId\n  ) external view returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);\n\n  function latestRoundData()\n    external\n    view\n    returns (uint80 roundId, int256 answer, uint256 startedAt, uint256 updatedAt, uint80 answeredInRound);\n}\n"
+    },
+    "contracts/FundMe.sol": {
+      "content": "// SPDX-License-Identifier: MIT\n//版本\npragma solidity ^0.8.7;\n//导入...\nimport \"@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol\";\nimport \"./PriceConverter.sol\";\n//报错合约_错误类型\nerror FundMe_NotOwner();\n\n//接口、库、合约\n/**@title\n * @author\n * @notice\n * 进行注释解释\n */\ncontract FundMe {\n    //类型声明\n\n    using PriceConverter for uint256; //将PriceConverter作为一个library（库）附着于uint256类型之上\n    //状态变量\n    mapping(address => uint256) private s_addressToAmountFunded; //s_代表该变量为public类型用storage存储，此处为节约gas改为了private\n    address[] private s_funders;\n\n    // Could we make this constant?  /* hint: no! We should make it immutable! */\n    address private immutable i_owner;\n    uint256 public constant MINIMUM_USD = 50 * 10 ** 18;\n    //创建一个全局变量priceFeed接收从构造函数里面传来的价格数据地址\n    AggregatorV3Interface private s_priceFeed;\n    //此时为了更好的接收不同的价格数据地址，在构造函数中添加一个参数：address priceFeedAddress\n    //修饰器\n    modifier onlyOwner() {\n        //会调用用onlyOwner标记的函数（如： function withdraw() public onlyOwner）前先调用该函数\n        // require(msg.sender == owner);\n        if (msg.sender != i_owner) revert FundMe_NotOwner(); //进行报错\n        _;\n    }\n\n    //函数\n    constructor(address priceFeedAddress) {\n        //构造函数：在部署合约时被自动调用的函数\n        i_owner = msg.sender; //保存合约发送（部署）者\n        s_priceFeed = AggregatorV3Interface(priceFeedAddress);\n    }\n\n    // function getVersion() public view returns (uint256){\n    //     // ETH/USD price feed address of Sepolia Network.\n    //     // AggregatorV3Interface priceFeed = AggregatorV3Interface(0x694AA1769357215DE4FAC081bf1f309aDC325306);\n    //       AggregatorV3Interface priceFeeds = priceFeed;\n\n    //     return priceFeeds.version();\n    // }\n\n    function withdraw() public onlyOwner {\n        for (\n            uint256 funderIndex = 0;\n            funderIndex < s_funders.length;\n            funderIndex++\n        ) {\n            address funder = s_funders[funderIndex];\n            s_addressToAmountFunded[funder] = 0;\n        }\n        s_funders = new address[](0);\n        // // transfer\n        // payable(msg.sender).transfer(address(this).balance);\n        // // send\n        // bool sendSuccess = payable(msg.sender).send(address(this).balance);\n        // require(sendSuccess, \"Send failed\");\n        // call\n        (bool callSuccess, ) = payable(msg.sender).call{\n            value: address(this).balance\n        }(\"\");\n        require(callSuccess, \"Call failed\");\n    }\n\n    // Explainer from: https://solidity-by-example.org/fallback/\n    // Ether is sent to contract\n    //      is msg.data empty?\n    //          /   \\\n    //         yes  no\n    //         /     \\\n    //    receive()?  fallback()\n    //     /   \\\n    //   yes   no\n    //  /        \\\n    //receive()  fallback()\n\n    fallback() external payable {\n        fund();\n    }\n\n    receive() external payable {\n        fund();\n    }\n\n    function fund() public payable {\n        //getConversionRate在这里直接接收priceFeed的参数\n        require(\n            msg.value.getConversionRate(s_priceFeed) >= MINIMUM_USD,\n            \"You need to spend more ETH!\"\n        );\n        // require(PriceConverter.getConversionRate(msg.value) >= MINIMUM_USD, \"You need to spend more ETH!\");\n        s_addressToAmountFunded[msg.sender] += msg.value;\n        s_funders.push(msg.sender);\n    }\n\n    // Concepts we didn't cover yet (will cover in later sections)\n    // 1. Enum\n    // 2. Events\n    // 3. Try / Catch\n    // 4. Function Selector\n    // 5. abi.encode / decode\n    // 6. Hash with keccak256\n    // 7. Yul / Assembly\n\n    function cheaperWithdraw() public onlyOwner {\n        address[] memory funders = s_funders;\n        // mappings can't be in memory, sorry!\n        for (\n            uint256 funderIndex = 0;\n            funderIndex < funders.length;\n            funderIndex++\n        ) {\n            address funder = funders[funderIndex];\n            s_addressToAmountFunded[funder] = 0;\n        }\n        funders = new address[](0);\n        // payable(msg.sender).transfer(address(this).balance);\n        (bool success, ) = i_owner.call{value: address(this).balance}(\"\");\n        require(success);\n    }\n\n    function getAddressToAmountFunded(\n        address fundingAddress\n    ) public view returns (uint256) {\n        return s_addressToAmountFunded[fundingAddress];\n    }\n\n    function getVersion() public view returns (uint256) {\n        return s_priceFeed.version();\n    }\n\n    function getFunder(uint256 index) public view returns (address) {\n        return s_funders[index];\n    }\n\n    function getOwner() public view returns (address) {\n        return i_owner;\n    }\n\n    function getPriceFeed() public view returns (AggregatorV3Interface) {\n        return s_priceFeed;\n    }\n}\n"
+    },
+    "contracts/PriceConverter.sol": {
+      "content": "// SPDX-License-Identifier: MIT\npragma solidity ^0.8.7;\n\nimport \"@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol\";\n\n// Why is this a library and not abstract?\n// Why not an interface?\nlibrary PriceConverter {\n    // We could make this public, but then we'd have to deploy it\n    function getPrice(\n        AggregatorV3Interface priceFeed\n    ) internal view returns (uint256) {\n        // Sepolia ETH / USD Address\n        // https://docs.chain.link/data-feeds/price-feeds/addresses#Sepolia%20Testnet\n        // AggregatorV3Interface priceFeed = AggregatorV3Interface(\n        //     0x694AA1769357215DE4FAC081bf1f309aDC325306 //分叉（fork）一个区块链，你可以在其中保留硬编码内容\n        //     //我们可以将这里的地址模块化、参数化，这样可以不用改动任何代码就可以部署在不同的区块链上\n        // );\n        (, int256 answer, , , ) = priceFeed.latestRoundData();\n        // ETH/USD rate in 18 digit\n        return uint256(answer * 10000000000);\n        // or (Both will do the same thing)\n        // return uint256(answer * 1e10); // 1* 10 ** 10 == 10000000000\n    }\n\n    // 1000000000\n    function getConversionRate(\n        uint256 ethAmount,\n        AggregatorV3Interface priceFeed\n    ) internal view returns (uint256) {\n        uint256 ethPrice = getPrice(priceFeed);\n        uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1000000000000000000;\n        // or (Both will do the same thing)\n        // uint256 ethAmountInUsd = (ethPrice * ethAmount) / 1e18; // 1 * 10 ** 18 == 1000000000000000000\n        // the actual ETH/USD conversion rate, after adjusting the extra 0s.\n        return ethAmountInUsd;\n    }\n}\n"
+    }
+  },
+  "settings": {
+    "optimizer": {
+      "enabled": false,
+      "runs": 200
+    },
+    "outputSelection": {
+      "*": {
+        "*": [
+          "abi",
+          "evm.bytecode",
+          "evm.deployedBytecode",
+          "evm.methodIdentifiers",
+          "metadata",
+          "devdoc",
+          "userdoc",
+          "storageLayout",
+          "evm.gasEstimates"
+        ],
+        "": [
+          "ast"
+        ]
+      }
+    },
+    "metadata": {
+      "useLiteralContent": true
+    }
+  }
+}
